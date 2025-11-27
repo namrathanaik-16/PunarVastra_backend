@@ -12,10 +12,10 @@ from datetime import datetime
 import uuid
 import io
 from PIL import Image
-import numpy as np
 
 # AI/ML Libraries
 try:
+    import numpy as np     ← MOVED inside try-except!
     import cv2
     import tensorflow as tf
     from sklearn.cluster import KMeans
