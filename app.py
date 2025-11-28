@@ -15,7 +15,7 @@ from PIL import Image
 
 # AI/ML Libraries
 try:
-    import numpy as np     ← MOVED inside try-except!
+    import numpy as np     
     import cv2
     import tensorflow as tf
     from sklearn.cluster import KMeans
