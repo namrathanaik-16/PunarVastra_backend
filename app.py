@@ -15,7 +15,7 @@ from PIL import Image
 
 # AI/ML Libraries
 try:
-    import numpy as np     
+    import numpy as np
     import cv2
     import tensorflow as tf
     from sklearn.cluster import KMeans
@@ -276,9 +276,17 @@ def upload_material():
             # Save file
             file.save(filepath)
             
-            # Get additional form data
-            weight = request.form.get('weight', '')
+            # Get additional form data from factory
+            quantity = request.form.get('quantity', '')  # Factory must provide quantity
+            price_per_kg = request.form.get('price_per_kg', '')  # Factory must provide price
             factory_id = request.form.get('factory_id', 'FAC-001')
+            factory_name = request.form.get('factory_name', 'Factory')
+            
+            # Validate required fields
+            if not quantity:
+                return jsonify({"error": "Quantity is required"}), 400
+            if not price_per_kg:
+                return jsonify({"error": "Price per kg is required"}), 400
             
             # Perform AI analysis
             ai_analysis = analyze_image_ai(filepath)
@@ -287,12 +295,15 @@ def upload_material():
             material = {
                 "id": f"MAT-{uuid.uuid4().hex[:8].upper()}",
                 "factory_id": factory_id,
+                "factory_name": factory_name,
                 "image_path": filepath,
+                "image_url": f"/uploads/{unique_filename}",
                 "uploaded_at": datetime.now().isoformat(),
-                "weight": weight if weight else f"{ai_analysis['estimated_weight']} kg",
+                "quantity": float(quantity),  # Quantity in kg
+                "price_per_kg": float(price_per_kg),  # Price set by factory
+                "total_amount": float(quantity) * float(price_per_kg),
                 "status": "available",
-                "ai_analysis": ai_analysis,
-                "price_per_kg": calculate_price(ai_analysis)
+                "ai_analysis": ai_analysis
             }
             
             # Store in database
@@ -390,6 +401,24 @@ def get_material(material_id):
         }), 200
     
     return jsonify({"error": "Material not found"}), 404
+
+
+@app.route('/api/factory/materials', methods=['GET'])
+def get_factory_materials():
+    """
+    Get materials uploaded by specific factory
+    Factory Dashboard endpoint - shows factory's own uploads
+    """
+    factory_id = request.args.get('factory_id', 'FAC-001')
+    
+    # Filter materials by factory
+    factory_materials = [m for m in materials_db if m['factory_id'] == factory_id]
+    
+    return jsonify({
+        "success": True,
+        "count": len(factory_materials),
+        "materials": factory_materials
+    }), 200
 
 
 @app.route('/api/orders', methods=['POST'])
