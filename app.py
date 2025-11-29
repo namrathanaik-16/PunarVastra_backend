@@ -3,7 +3,7 @@ PunarVastra Backend API with AI Model Integration
 Flask REST API for textile waste analysis and marketplace
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
@@ -245,10 +245,17 @@ def home():
             "upload": "/api/upload",
             "materials": "/api/materials",
             "analyze": "/api/analyze",
-            "orders": "/api/orders"
+            "orders": "/api/orders",
+            "images": "/uploads/<filename>"
         },
         "ai_enabled": HAS_AI_LIBS
     })
+
+
+@app.route('/uploads/<filename>')
+def serve_image(filename):
+    """Serve uploaded images"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -431,7 +438,7 @@ def create_order():
         data = request.json
         
         # Validate required fields
-        required_fields = ['material_id', 'artisan_name', 'quantity', 'address']
+        required_fields = ['material_id', 'artisan_name', 'email', 'quantity', 'address']
         if not all(field in data for field in required_fields):
             return jsonify({"error": "Missing required fields"}), 400
         
@@ -444,21 +451,41 @@ def create_order():
         if material['status'] != 'available':
             return jsonify({"error": "Material not available"}), 400
         
+        # Check if requested quantity is available
+        if float(data['quantity']) > material['quantity']:
+            return jsonify({"error": f"Requested quantity ({data['quantity']} kg) exceeds available quantity ({material['quantity']} kg)"}), 400
+        
+        # Calculate total amount
+        total_amount = float(data['quantity']) * material['price_per_kg']
+        
         # Create order
         order = {
             "id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
             "material_id": data['material_id'],
+            "material_details": {
+                "color": material['ai_analysis']['color'],
+                "texture": material['ai_analysis']['texture'],
+                "pattern": material['ai_analysis']['pattern']
+            },
+            "factory_id": material['factory_id'],
+            "factory_name": material['factory_name'],
             "artisan_name": data['artisan_name'],
             "contact": data.get('contact', ''),
-            "quantity": data['quantity'],
+            "email": data['email'],
+            "quantity": float(data['quantity']),
+            "unit_price": material['price_per_kg'],
+            "total_amount": total_amount,
             "address": data['address'],
             "status": "pending",
-            "created_at": datetime.now().isoformat(),
-            "total_amount": calculate_order_total(material, data['quantity'])
+            "created_at": datetime.now().isoformat()
         }
         
-        # Update material status
-        material['status'] = 'sold'
+        # Update material quantity (reduce available quantity)
+        material['quantity'] -= float(data['quantity'])
+        
+        # If no quantity left, mark as sold
+        if material['quantity'] <= 0:
+            material['status'] = 'sold'
         
         # Store order
         orders_db.append(order)
