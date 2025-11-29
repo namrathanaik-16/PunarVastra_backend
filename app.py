@@ -12,6 +12,7 @@ from datetime import datetime
 import uuid
 import io
 from PIL import Image
+import json
 
 # AI/ML Libraries
 try:
@@ -36,9 +37,56 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Create upload folder if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# In-memory database (replace with actual database in production)
+# Database files
+DB_FILE = 'materials_db.json'
+ORDERS_FILE = 'orders_db.json'
+
+# In-memory database (loaded from files)
 materials_db = []
 orders_db = []
+
+
+def load_database():
+    """Load materials and orders from JSON files"""
+    global materials_db, orders_db
+    
+    try:
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, 'r') as f:
+                materials_db = json.load(f)
+    except Exception as e:
+        print(f"Error loading materials database: {e}")
+        materials_db = []
+    
+    try:
+        if os.path.exists(ORDERS_FILE):
+            with open(ORDERS_FILE, 'r') as f:
+                orders_db = json.load(f)
+    except Exception as e:
+        print(f"Error loading orders database: {e}")
+        orders_db = []
+
+
+def save_materials():
+    """Save materials to JSON file"""
+    try:
+        with open(DB_FILE, 'w') as f:
+            json.dump(materials_db, f, indent=2)
+    except Exception as e:
+        print(f"Error saving materials database: {e}")
+
+
+def save_orders():
+    """Save orders to JSON file"""
+    try:
+        with open(ORDERS_FILE, 'w') as f:
+            json.dump(orders_db, f, indent=2)
+    except Exception as e:
+        print(f"Error saving orders database: {e}")
+
+
+# Load database on startup
+load_database()
 
 
 def allowed_file(filename):
@@ -72,23 +120,39 @@ def analyze_image_ai(image_path):
         # Color classification
         color_name = classify_color(dominant_color)
         
-        # Texture Analysis (using Gabor filters or edge detection)
+        # Advanced Texture Analysis
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Edge detection for texture
         edges = cv2.Canny(gray, 50, 150)
         edge_density = np.sum(edges > 0) / edges.size
         
-        # Texture classification based on edge density
-        if edge_density < 0.1:
-            texture = "Smooth Cotton"
-        elif edge_density < 0.2:
-            texture = "Cotton"
-        elif edge_density < 0.3:
-            texture = "Textured Cotton"
-        else:
-            texture = "Complex Pattern/Denim"
+        # Calculate variance for smoothness
+        variance = np.var(gray)
         
-        # Pattern Detection (basic)
-        pattern = detect_pattern(img_rgb, edge_density)
+        # Calculate standard deviation for texture complexity
+        std_dev = np.std(gray)
+        
+        # Improved texture classification
+        if edge_density < 0.05 and variance < 1000:
+            texture = "Smooth Silk"
+        elif edge_density < 0.10 and variance < 2000:
+            texture = "Smooth Cotton"
+        elif edge_density < 0.15 and std_dev < 40:
+            texture = "Cotton"
+        elif edge_density < 0.20 and std_dev < 60:
+            texture = "Textured Cotton"
+        elif edge_density > 0.25 and std_dev > 50:
+            texture = "Denim"
+        elif variance > 3000:
+            texture = "Polyester Mix"
+        elif edge_density > 0.20:
+            texture = "Canvas/Heavy Cotton"
+        else:
+            texture = "Cotton Blend"
+        
+        # Pattern Detection (improved)
+        pattern = detect_pattern(img_rgb, edge_density, variance)
         
         # Quality Assessment (based on image clarity and resolution)
         quality_score = assess_quality(img)
@@ -104,12 +168,68 @@ def analyze_image_ai(image_path):
             "quality": quality_score,
             "quality_rating": get_quality_rating(quality_score),
             "estimated_weight": estimated_weight,
-            "dominant_colors": [rgb_to_hex(c) for c in colors[:3]]
+            "dominant_colors": [rgb_to_hex(c) for c in colors[:3]],
+            "upcycling_ideas": get_upcycling_ideas(texture, pattern, color_name)
         }
     
     except Exception as e:
         print(f"AI Analysis Error: {e}")
         return simulate_ai_analysis()
+
+
+def get_upcycling_ideas(texture, pattern, color):
+    """Generate upcycling ideas based on material properties"""
+    ideas = []
+    
+    # Texture-based ideas
+    if "Cotton" in texture:
+        ideas.extend([
+            "Tote bags and shopping bags",
+            "Quilts and patchwork blankets",
+            "Cushion covers and pillow cases",
+            "Kitchen towels and napkins",
+            "Eco-friendly gift wrapping"
+        ])
+    elif "Denim" in texture:
+        ideas.extend([
+            "Denim jackets and vests",
+            "Tote bags and backpacks",
+            "Aprons and work wear",
+            "Home organizers and wall pockets",
+            "Pet accessories and toys"
+        ])
+    elif "Silk" in texture:
+        ideas.extend([
+            "Scarves and accessories",
+            "Premium cushion covers",
+            "Decorative wall hangings",
+            "Gift wrapping and packaging",
+            "Jewelry pouches"
+        ])
+    elif "Polyester" in texture:
+        ideas.extend([
+            "Outdoor cushions and covers",
+            "Reusable shopping bags",
+            "Sports and gym bags",
+            "Waterproof pouches",
+            "Pet beds and accessories"
+        ])
+    else:
+        ideas.extend([
+            "Mixed fabric quilts",
+            "Patchwork home decor",
+            "Craft projects",
+            "Fabric scrap art",
+            "Multi-purpose bags"
+        ])
+    
+    # Pattern-based additions
+    if "Patchwork" in pattern or "Floral" in pattern:
+        ideas.append("Bohemian style clothing")
+        ideas.append("Decorative wall art")
+    
+    # Return top 5 most relevant ideas
+    return ideas[:5]
 
 
 def simulate_ai_analysis():
@@ -140,48 +260,103 @@ def simulate_ai_analysis():
         "Abstract"
     ]
     
+    selected_color = random.choice(colors)
+    selected_texture = random.choice(textures)
+    selected_pattern = random.choice(patterns)
+    
     return {
-        "color": random.choice(colors),
+        "color": selected_color,
         "color_hex": "#d4af37",
-        "texture": random.choice(textures),
-        "pattern": random.choice(patterns),
+        "texture": selected_texture,
+        "pattern": selected_pattern,
         "quality": round(random.uniform(0.7, 0.95), 2),
         "quality_rating": "Excellent",
         "estimated_weight": round(random.uniform(1.0, 5.0), 1),
-        "dominant_colors": ["#d4af37", "#c94b7d", "#667eea"]
+        "dominant_colors": ["#d4af37", "#c94b7d", "#667eea"],
+        "upcycling_ideas": get_upcycling_ideas(selected_texture, selected_pattern, selected_color)
     }
 
 
 def classify_color(rgb):
-    """Classify RGB color into named category"""
+    """Classify RGB color into named category with better accuracy"""
     r, g, b = rgb
     
-    if r > 200 and g < 100 and b < 100:
-        return "Red/Pink"
-    elif r < 100 and g < 100 and b > 200:
-        return "Blue"
-    elif r < 100 and g > 200 and b < 100:
-        return "Green"
-    elif r > 200 and g > 200 and b < 100:
-        return "Yellow/Gold"
-    elif r > 150 and g > 150 and b > 150:
-        return "Light/White"
-    elif r < 100 and g < 100 and b < 100:
-        return "Dark/Black"
+    # Calculate color properties
+    max_val = max(r, g, b)
+    min_val = min(r, g, b)
+    diff = max_val - min_val
+    
+    # Check for grayscale
+    if diff < 30:
+        if max_val > 200:
+            return "White/Light"
+        elif max_val < 80:
+            return "Black/Dark"
+        else:
+            return "Gray"
+    
+    # Red family
+    if r > g + 30 and r > b + 30:
+        if r > 180 and g < 100:
+            return "Red"
+        elif r > 150 and g > 80 and g < 150:
+            return "Pink/Coral"
+        elif r > 140 and g > 60:
+            return "Orange/Peach"
+        else:
+            return "Red/Pink"
+    
+    # Blue family
+    elif b > r + 30 and b > g + 30:
+        if b > 150 and r < 100:
+            return "Blue"
+        elif b > 100 and r > 80:
+            return "Purple/Violet"
+        else:
+            return "Blue"
+    
+    # Green family
+    elif g > r + 30 and g > b + 30:
+        if g > 150 and b < 100:
+            return "Green"
+        elif g > 150 and b > 100:
+            return "Teal/Cyan"
+        else:
+            return "Green"
+    
+    # Yellow family
+    elif r > 150 and g > 150 and b < 120:
+        if r > 200 and g > 200:
+            return "Yellow"
+        else:
+            return "Yellow/Gold"
+    
+    # Brown family
+    elif r > 100 and g > 60 and b < 100 and r > g and g > b:
+        return "Brown/Tan"
+    
+    # Multi-color (when no dominant color)
     else:
         return "Multi-color"
 
 
-def detect_pattern(img, edge_density):
-    """Detect pattern type from image"""
-    if edge_density > 0.3:
+def detect_pattern(img, edge_density, variance):
+    """Detect pattern type from image with improved accuracy"""
+    # High edge density suggests complex patterns
+    if edge_density > 0.30:
         return "Complex Patchwork"
-    elif edge_density > 0.2:
+    elif edge_density > 0.22:
         return "Patchwork"
-    elif edge_density > 0.1:
-        return "Simple Pattern"
+    elif edge_density > 0.15 and variance > 2500:
+        return "Geometric"
+    elif variance > 3500:
+        return "Abstract/Mixed"
+    elif edge_density < 0.08:
+        return "Solid/Plain"
+    elif 0.12 < edge_density < 0.18:
+        return "Striped/Linear"
     else:
-        return "Solid/Minimal Pattern"
+        return "Textured"
 
 
 def assess_quality(img):
@@ -315,6 +490,7 @@ def upload_material():
             
             # Store in database
             materials_db.append(material)
+            save_materials()  # Persist to file
             
             return jsonify({
                 "success": True,
@@ -489,6 +665,8 @@ def create_order():
         
         # Store order
         orders_db.append(order)
+        save_orders()  # Persist to file
+        save_materials()  # Save updated material quantity
         
         return jsonify({
             "success": True,
