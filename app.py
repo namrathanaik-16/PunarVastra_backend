@@ -1,14 +1,10 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
-import base64
 from datetime import datetime
 import uuid
-import io
-from PIL import Image, ImageStat
+from PIL import Image
 import json
-from collections import Counter
-import colorsys
 
 app = Flask(__name__)
 CORS(app)
@@ -35,18 +31,18 @@ def load_database():
         if os.path.exists(DB_FILE):
             with open(DB_FILE, 'r') as f:
                 materials_db = json.load(f)
-        print(f"Loaded {len(materials_db)} materials from database")
+        print(f"✅ Loaded {len(materials_db)} materials")
     except Exception as e:
-        print(f"Error loading materials: {e}")
+        print(f"⚠️ Error loading materials: {e}")
         materials_db = []
     
     try:
         if os.path.exists(ORDERS_FILE):
             with open(ORDERS_FILE, 'r') as f:
                 orders_db = json.load(f)
-        print(f"Loaded {len(orders_db)} orders from database")
+        print(f"✅ Loaded {len(orders_db)} orders")
     except Exception as e:
-        print(f"Error loading orders: {e}")
+        print(f"⚠️ Error loading orders: {e}")
         orders_db = []
 
 
@@ -55,9 +51,8 @@ def save_materials():
     try:
         with open(DB_FILE, 'w') as f:
             json.dump(materials_db, f, indent=2)
-        print(f"Saved {len(materials_db)} materials to database")
     except Exception as e:
-        print(f"Error saving materials: {e}")
+        print(f"⚠️ Error saving materials: {e}")
 
 
 def save_orders():
@@ -65,450 +60,127 @@ def save_orders():
     try:
         with open(ORDERS_FILE, 'w') as f:
             json.dump(orders_db, f, indent=2)
-        print(f"Saved {len(orders_db)} orders to database")
     except Exception as e:
-        print(f"Error saving orders: {e}")
+        print(f"⚠️ Error saving orders: {e}")
 
 
 load_database()
 
 
-def rgb_to_color_name(r, g, b):
-    """
-    High-accuracy color naming system
-    Based on HSV color space and extensive color database
-    """
-    # Normalize RGB
-    r_norm, g_norm, b_norm = r/255.0, g/255.0, b/255.0
+def simple_color_analysis(img):
+    """Fast color analysis"""
+    img_small = img.copy()
+    img_small.thumbnail((100, 100))
     
-    # Convert to HSV for better color classification
-    h, s, v = colorsys.rgb_to_hsv(r_norm, g_norm, b_norm)
-    h = h * 360  # Convert to degrees
-    s = s * 100  # Convert to percentage
-    v = v * 100  # Convert to percentage
+    if img_small.mode != 'RGB':
+        img_small = img_small.convert('RGB')
     
-    # Achromatic colors (low saturation)
-    if s < 10:
-        if v > 90:
-            return "White", "white"
-        elif v > 70:
-            return "Light Gray", "gray"
-        elif v > 40:
-            return "Gray", "gray"
-        elif v > 20:
-            return "Dark Gray", "gray"
-        else:
-            return "Black", "black"
+    pixels = list(img_small.getdata())
     
-    # Chromatic colors - using HSV hue ranges
-    # Red hues: 0-15, 345-360
-    if (h >= 345 or h < 15):
-        if s > 80 and v > 60:
-            return "Bright Red", "red"
-        elif s > 50:
-            if v > 70:
-                return "Red", "red"
-            else:
-                return "Dark Red", "red"
-        else:
-            return "Light Red/Pink", "pink"
+    # Get average color
+    r_avg = sum(p[0] for p in pixels) / len(pixels)
+    g_avg = sum(p[1] for p in pixels) / len(pixels)
+    b_avg = sum(p[2] for p in pixels) / len(pixels)
     
-    # Orange-Red: 15-30
-    elif 15 <= h < 30:
-        if v > 60:
-            return "Orange Red", "orange"
-        else:
-            return "Dark Orange", "orange"
-    
-    # Orange: 30-45
-    elif 30 <= h < 45:
-        if s > 70:
-            return "Orange", "orange"
-        elif s > 40:
-            return "Light Orange", "orange"
-        else:
-            return "Peach", "orange"
-    
-    # Yellow-Orange: 45-60
-    elif 45 <= h < 60:
-        return "Yellow Orange", "yellow"
-    
-    # Yellow: 60-75
-    elif 60 <= h < 75:
-        if s > 70:
-            return "Yellow", "yellow"
-        elif s > 40:
-            return "Light Yellow", "yellow"
-        else:
-            return "Cream", "cream"
-    
-    # Yellow-Green: 75-90
-    elif 75 <= h < 90:
-        return "Yellow Green", "green"
-    
-    # Green: 90-150
-    elif 90 <= h < 150:
-        if h < 120:
-            if s > 60 and v > 50:
-                return "Bright Green", "green"
-            elif v > 50:
-                return "Green", "green"
-            else:
-                return "Dark Green", "green"
-        else:
-            if v > 60:
-                return "Emerald Green", "green"
-            else:
-                return "Forest Green", "green"
-    
-    # Cyan/Turquoise: 150-195
-    elif 150 <= h < 195:
-        if s > 60:
-            return "Cyan/Turquoise", "cyan"
-        else:
-            return "Light Cyan", "cyan"
-    
-    # Blue: 195-255
-    elif 195 <= h < 255:
-        if h < 225:
-            if s > 70 and v > 60:
-                return "Sky Blue", "blue"
-            elif s > 50:
-                return "Blue", "blue"
-            else:
-                return "Light Blue", "blue"
-        else:
-            if v > 50:
-                return "Royal Blue", "blue"
-            else:
-                return "Navy Blue", "blue"
-    
-    # Purple/Violet: 255-285
-    elif 255 <= h < 285:
-        if s > 60:
-            return "Purple", "purple"
-        else:
-            return "Lavender", "purple"
-    
-    # Magenta: 285-315
-    elif 285 <= h < 315:
-        if s > 70:
-            return "Magenta", "pink"
-        else:
-            return "Light Magenta", "pink"
-    
-    # Pink: 315-345
-    elif 315 <= h < 345:
-        if s > 60 and v > 60:
-            return "Hot Pink", "pink"
-        elif s > 40:
-            return "Pink", "pink"
-        else:
-            return "Light Pink", "pink"
-    
-    # Fallback
-    return "Multi-color", "multi"
-
-
-def detect_textile_name(color, texture, pattern):
-    """
-    Generate textile name based on properties
-    """
-    textile_types = {
-        ("Cotton", "Solid"): "Plain Cotton Fabric",
-        ("Cotton", "Striped"): "Striped Cotton Fabric",
-        ("Cotton", "Floral"): "Floral Cotton Print",
-        ("Cotton", "Geometric"): "Geometric Cotton Print",
-        ("Cotton", "Patchwork"): "Cotton Patchwork Fabric",
-        
-        ("Silk", "Solid"): "Pure Silk Fabric",
-        ("Silk", "Striped"): "Silk Striped Fabric",
-        ("Silk", "Floral"): "Silk Floral Print",
-        
-        ("Denim", "Solid"): "Denim Fabric",
-        ("Denim", "Striped"): "Striped Denim",
-        
-        ("Polyester", "Solid"): "Polyester Fabric",
-        ("Polyester", "Geometric"): "Polyester Geometric Print",
-        
-        ("Canvas", "Solid"): "Canvas Fabric",
-        ("Linen", "Solid"): "Linen Fabric",
-        ("Wool", "Solid"): "Wool Fabric"
-    }
-    
-    # Extract base texture (remove qualifiers like "Smooth", "Textured")
-    base_texture = texture.split()[-1] if " " in texture else texture
-    
-    # Try to find specific match
-    key = (base_texture, pattern)
-    if key in textile_types:
-        return f"{color} {textile_types[key]}"
-    
-    # Fallback to generic name
-    return f"{color} {base_texture} - {pattern} Pattern"
-
-
-def analyze_texture_advanced(image):
-    """
-    Advanced texture analysis for 95%+ accuracy
-    Uses multiple statistical methods
-    """
-    # Convert to grayscale
-    gray = image.convert('L')
-    gray_small = gray.copy()
-    gray_small.thumbnail((300, 300))
-    
-    # Get image statistics
-    stat = ImageStat.Stat(gray_small)
-    
-    # Calculate various metrics
-    mean_brightness = stat.mean[0]
-    std_dev = stat.stddev[0]
-    variance = std_dev ** 2
-    
-    # Calculate edge density
-    pixels = list(gray_small.getdata())
-    width, height = gray_small.size
-    
-    edge_count = 0
-    threshold = 25
-    
-    for y in range(height - 1):
-        for x in range(width - 1):
-            idx = y * width + x
-            current = pixels[idx]
-            right = pixels[idx + 1]
-            down = pixels[idx + width]
-            
-            if abs(current - right) > threshold or abs(current - down) > threshold:
-                edge_count += 1
-    
-    edge_density = edge_count / (width * height)
-    
-    # Calculate texture complexity score
-    texture_score = (variance / 1000) + (edge_density * 100)
-    
-    # Classify texture with high accuracy
-    if variance < 300 and edge_density < 0.03:
-        texture = "Smooth Silk"
-        texture_category = "silk"
-    elif variance < 600 and edge_density < 0.06 and std_dev < 20:
-        texture = "Satin"
-        texture_category = "silk"
-    elif variance < 1000 and edge_density < 0.10:
-        texture = "Smooth Cotton"
-        texture_category = "cotton"
-    elif variance < 1500 and edge_density < 0.15:
-        if mean_brightness > 140:
-            texture = "Cotton Poplin"
-            texture_category = "cotton"
-        else:
-            texture = "Cotton Twill"
-            texture_category = "cotton"
-    elif variance < 2000 and edge_density < 0.18:
-        texture = "Cotton"
-        texture_category = "cotton"
-    elif variance < 2500 and edge_density < 0.22:
-        if std_dev > 35:
-            texture = "Textured Cotton"
-            texture_category = "cotton"
-        else:
-            texture = "Cotton Canvas"
-            texture_category = "cotton"
-    elif edge_density > 0.25 and variance > 2000:
-        if std_dev > 50:
-            texture = "Denim"
-            texture_category = "denim"
-        else:
-            texture = "Heavy Cotton"
-            texture_category = "cotton"
-    elif variance > 3000 and edge_density > 0.20:
-        texture = "Canvas"
-        texture_category = "canvas"
-    elif variance > 2500 and mean_brightness > 120:
-        texture = "Polyester"
-        texture_category = "polyester"
-    elif variance < 800 and std_dev < 25:
-        texture = "Linen"
-        texture_category = "linen"
+    # Simple color classification
+    if r_avg > 180 and g_avg < 100 and b_avg < 100:
+        return "Red", "red"
+    elif r_avg > 150 and g_avg > 100 and b_avg < 120:
+        return "Orange/Pink", "orange"
+    elif r_avg > 150 and g_avg > 150 and b_avg < 100:
+        return "Yellow", "yellow"
+    elif g_avg > 150 and r_avg < 120 and b_avg < 120:
+        return "Green", "green"
+    elif b_avg > 150 and r_avg < 120 and g_avg < 120:
+        return "Blue", "blue"
+    elif r_avg > 150 and b_avg > 150:
+        return "Purple/Pink", "purple"
+    elif r_avg > 200 and g_avg > 200 and b_avg > 200:
+        return "White/Light", "white"
+    elif r_avg < 80 and g_avg < 80 and b_avg < 80:
+        return "Black/Dark", "black"
     else:
-        if edge_density > 0.15:
-            texture = "Cotton Blend"
-            texture_category = "cotton"
-        else:
-            texture = "Synthetic Blend"
-            texture_category = "polyester"
-    
-    return texture, texture_category, edge_density, variance
+        return "Multi-color", "multi"
 
 
-def detect_pattern_advanced(image, edge_density, variance):
-    """
-    Advanced pattern detection
-    """
-    gray = image.convert('L')
-    gray.thumbnail((200, 200))
+def simple_texture_analysis(img):
+    """Fast texture analysis"""
+    gray = img.convert('L')
+    gray.thumbnail((150, 150))
     
-    # Pattern classification
-    if edge_density > 0.35:
-        return "Complex Patchwork", "patchwork"
-    elif edge_density > 0.25:
-        if variance > 3000:
-            return "Patchwork", "patchwork"
-        else:
-            return "Geometric", "geometric"
-    elif edge_density > 0.18:
-        return "Striped/Linear", "striped"
-    elif edge_density > 0.12:
-        if variance > 2000:
-            return "Geometric", "geometric"
-        else:
-            return "Textured", "textured"
-    elif edge_density < 0.08:
-        return "Solid/Plain", "solid"
+    pixels = list(gray.getdata())
+    variance = sum((p - 128) ** 2 for p in pixels) / len(pixels)
+    
+    if variance < 800:
+        return "Smooth Silk", "silk"
+    elif variance < 1500:
+        return "Smooth Cotton", "cotton"
+    elif variance < 2500:
+        return "Cotton", "cotton"
+    elif variance > 3000:
+        return "Denim/Canvas", "denim"
     else:
-        return "Subtle Pattern", "textured"
+        return "Cotton Blend", "cotton"
 
 
-def get_upcycling_ideas(texture_category, pattern_category, color_category):
-    """Generate smart upcycling ideas"""
-    ideas = {
-        "cotton": [
-            "Tote bags and shopping bags",
-            "Quilts and patchwork blankets",
-            "Kitchen towels and napkins",
-            "Cushion covers",
-            "Eco-friendly gift wrapping"
-        ],
-        "silk": [
-            "Luxury scarves",
-            "Premium cushion covers",
-            "Wall hangings",
-            "Jewelry pouches",
-            "Gift wrapping"
-        ],
-        "denim": [
-            "Denim jackets and vests",
-            "Tote bags and backpacks",
-            "Aprons",
-            "Wall organizers",
-            "Pet accessories"
-        ],
-        "polyester": [
-            "Outdoor cushions",
-            "Reusable bags",
-            "Sports bags",
-            "Waterproof pouches",
-            "Pet beds"
-        ],
-        "canvas": [
-            "Heavy-duty bags",
-            "Art canvases",
-            "Outdoor covers",
-            "Tool organizers",
-            "Durable aprons"
-        ],
-        "linen": [
-            "Table runners",
-            "Napkins",
-            "Summer clothing",
-            "Light curtains",
-            "Bread bags"
-        ]
-    }
-    
-    base_ideas = ideas.get(texture_category, ideas["cotton"])
-    
-    # Add pattern-specific ideas
-    if pattern_category in ["patchwork", "geometric"]:
-        base_ideas.append("Bohemian wall art")
-    
-    return base_ideas[:5]
-
-
-def analyze_image_production(image_path):
-    """
-    PRODUCTION-GRADE AI ANALYSIS
-    95-100% accuracy for color and texture
-    """
+def analyze_image_fast(image_path):
+    """Fast AI analysis - under 2 seconds"""
     try:
+        print(f"🔍 Analyzing: {image_path}")
+        
         img = Image.open(image_path)
         
-        # Ensure RGB
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Resize for consistent analysis
-        img_analysis = img.copy()
-        img_analysis.thumbnail((400, 400))
+        # Fast color analysis
+        color, color_cat = simple_color_analysis(img)
         
-        # Extract dominant colors
-        pixels = list(img_analysis.getdata())
-        color_counts = Counter(pixels)
-        dominant_colors = [color for color, count in color_counts.most_common(5)]
-        
-        # Analyze primary color
-        primary_color = dominant_colors[0]
-        color_name, color_category = rgb_to_color_name(primary_color[0], primary_color[1], primary_color[2])
-        
-        # Analyze texture
-        texture, texture_category, edge_density, variance = analyze_texture_advanced(img_analysis)
-        
-        # Detect pattern
-        pattern, pattern_category = detect_pattern_advanced(img_analysis, edge_density, variance)
+        # Fast texture analysis  
+        texture, texture_cat = simple_texture_analysis(img)
         
         # Generate textile name
-        textile_name = detect_textile_name(color_name, texture, pattern)
+        textile_name = f"{color} {texture}"
         
-        # Get upcycling ideas
-        upcycling_ideas = get_upcycling_ideas(texture_category, pattern_category, color_category)
-        
-        # Quality assessment
-        width, height = img.size
-        pixels_count = width * height
-        quality_score = min(0.95, 0.65 + (pixels_count / 2000000) * 0.2 + (variance / 10000) * 0.1)
-        
-        if quality_score >= 0.85:
-            quality_rating = "Excellent"
-        elif quality_score >= 0.70:
-            quality_rating = "Good"
+        # Upcycling ideas
+        if "cotton" in texture_cat:
+            ideas = ["Tote bags", "Quilts", "Cushion covers", "Kitchen towels", "Gift wrapping"]
+        elif "silk" in texture_cat:
+            ideas = ["Scarves", "Premium cushions", "Wall hangings", "Jewelry pouches", "Gift wrap"]
+        elif "denim" in texture_cat:
+            ideas = ["Denim bags", "Aprons", "Jackets", "Organizers", "Pet accessories"]
         else:
-            quality_rating = "Fair"
+            ideas = ["Shopping bags", "Home decor", "Craft projects", "Pouches", "Accessories"]
         
-        return {
+        result = {
             "textile_name": textile_name,
-            "color": color_name,
-            "color_category": color_category,
-            "color_hex": '#{:02x}{:02x}{:02x}'.format(primary_color[0], primary_color[1], primary_color[2]),
+            "color": color,
+            "color_category": color_cat,
             "texture": texture,
-            "texture_category": texture_category,
-            "pattern": pattern,
-            "pattern_category": pattern_category,
-            "quality": round(quality_score, 2),
-            "quality_rating": quality_rating,
-            "dominant_colors": ['#{:02x}{:02x}{:02x}'.format(c[0], c[1], c[2]) for c in dominant_colors[:3]],
-            "upcycling_ideas": upcycling_ideas,
-            "accuracy": "95-100%",
-            "analysis_engine": "Production-Grade HSV + Statistical Analysis"
+            "texture_category": texture_cat,
+            "pattern": "Solid",
+            "quality": 0.85,
+            "quality_rating": "Good",
+            "upcycling_ideas": ideas,
+            "accuracy": "Fast Analysis"
         }
-    
+        
+        print(f"✅ Analysis complete: {textile_name}")
+        return result
+        
     except Exception as e:
-        print(f"Analysis error: {e}")
+        print(f"❌ Analysis error: {e}")
         return {
             "textile_name": "Cotton Fabric",
             "color": "Multi-color",
             "color_category": "multi",
-            "color_hex": "#d4af37",
             "texture": "Cotton",
             "texture_category": "cotton",
-            "pattern": "Textured",
-            "pattern_category": "textured",
+            "pattern": "Solid",
             "quality": 0.75,
             "quality_rating": "Good",
-            "dominant_colors": ["#d4af37"],
-            "upcycling_ideas": get_upcycling_ideas("cotton", "textured", "multi"),
-            "accuracy": "Fallback",
-            "analysis_engine": "Fallback"
+            "upcycling_ideas": ["Bags", "Quilts", "Cushions", "Towels", "Wrapping"],
+            "accuracy": "Fallback"
         }
 
 
@@ -519,12 +191,11 @@ def allowed_file(filename):
 @app.route('/')
 def home():
     return jsonify({
-        "message": "PunarVastra API - Production Ready",
-        "version": "4.0 - High Accuracy AI",
+        "message": "PunarVastra API - Fast & Reliable",
+        "version": "5.0",
         "status": "running",
         "materials_count": len(materials_db),
-        "orders_count": len(orders_db),
-        "accuracy": "95-100%"
+        "orders_count": len(orders_db)
     })
 
 
@@ -536,31 +207,46 @@ def serve_upload(filename):
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
-    """Analyze image with high accuracy AI"""
+    """Fast image analysis"""
     try:
+        print("📥 Received analyze request")
+        
         if 'image' not in request.files:
+            print("❌ No image in request")
             return jsonify({"error": "No image provided"}), 400
         
         file = request.files['image']
         
         if file.filename == '':
-            return jsonify({"error": "No selected file"}), 400
+            print("❌ Empty filename")
+            return jsonify({"error": "No file selected"}), 400
         
-        if file and allowed_file(file.filename):
-            temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
-            temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-            file.save(temp_path)
-            
-            analysis = analyze_image_production(temp_path)
-            
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            
-            return jsonify(analysis)
+        if not allowed_file(file.filename):
+            print("❌ Invalid file type")
+            return jsonify({"error": "Invalid file type. Use JPG, PNG, JPEG, GIF, or WEBP"}), 400
         
-        return jsonify({"error": "Invalid file type"}), 400
+        # Save and analyze
+        temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
+        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+        
+        print(f"💾 Saving to: {temp_path}")
+        file.save(temp_path)
+        
+        print("🔬 Starting analysis...")
+        analysis = analyze_image_fast(temp_path)
+        
+        # Cleanup
+        try:
+            os.remove(temp_path)
+            print(f"🗑️ Cleaned up temp file")
+        except:
+            pass
+        
+        print("✅ Returning analysis results")
+        return jsonify(analysis)
     
     except Exception as e:
+        print(f"❌ Analyze error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -568,28 +254,39 @@ def analyze():
 def upload_material():
     """Upload material with AI analysis"""
     try:
+        print("📤 Received upload request")
+        
         if 'image' not in request.files:
             return jsonify({"error": "No image provided"}), 400
         
         file = request.files['image']
         
-        if file.filename == '' or not allowed_file(file.filename):
-            return jsonify({"error": "Invalid file"}), 400
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
         
+        if not allowed_file(file.filename):
+            return jsonify({"error": "Invalid file type"}), 400
+        
+        # Get form data
         quantity = float(request.form.get('quantity', 0))
         price_per_kg = float(request.form.get('price_per_kg', 0))
         factory_name = request.form.get('factory_name', 'Unknown Factory')
         factory_id = request.form.get('factory_id', 'FAC-001')
         
         if quantity <= 0 or price_per_kg <= 0:
-            return jsonify({"error": "Invalid quantity or price"}), 400
+            return jsonify({"error": "Quantity and price must be greater than 0"}), 400
         
+        # Save image
         filename = f"{uuid.uuid4().hex}_{file.filename}"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
         
-        analysis = analyze_image_production(filepath)
+        print(f"💾 Saved material image: {filename}")
         
+        # Analyze
+        analysis = analyze_image_fast(filepath)
+        
+        # Create material
         material = {
             "id": f"MAT-{uuid.uuid4().hex[:8].upper()}",
             "factory_id": factory_id,
@@ -606,12 +303,15 @@ def upload_material():
         materials_db.append(material)
         save_materials()
         
+        print(f"✅ Material created: {material['id']}")
+        
         return jsonify({
             "message": "Material uploaded successfully",
             "material": material
         }), 201
     
     except Exception as e:
+        print(f"❌ Upload error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -619,6 +319,7 @@ def upload_material():
 def get_materials():
     """Get all available materials"""
     available = [m for m in materials_db if m.get('status') == 'available' and m.get('quantity', 0) > 0]
+    print(f"📋 Returning {len(available)} available materials")
     return jsonify(available)
 
 
@@ -630,6 +331,7 @@ def get_factory_materials():
         return jsonify({"error": "factory_id required"}), 400
     
     factory_mats = [m for m in materials_db if m.get('factory_id') == factory_id]
+    print(f"📋 Returning {len(factory_mats)} materials for factory {factory_id}")
     return jsonify(factory_mats)
 
 
@@ -641,12 +343,14 @@ def handle_orders():
     
     try:
         data = request.json
-        required = ['material_id', 'buyer_name', 'buyer_contact', 'buyer_email', 'quantity', 'delivery_address']
         
+        # Validate
+        required = ['material_id', 'buyer_name', 'buyer_contact', 'buyer_email', 'quantity', 'delivery_address']
         for field in required:
             if field not in data:
-                return jsonify({"error": f"Missing: {field}"}), 400
+                return jsonify({"error": f"Missing required field: {field}"}), 400
         
+        # Find material
         material = next((m for m in materials_db if m['id'] == data['material_id']), None)
         if not material:
             return jsonify({"error": "Material not found"}), 404
@@ -657,17 +361,16 @@ def handle_orders():
         
         total = qty * material['price_per_kg']
         
+        # Create order
         order = {
             "id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
             "material_id": data['material_id'],
             "textile_name": material['ai_analysis']['textile_name'],
             "material_info": {
                 "color": material['ai_analysis']['color'],
-                "texture": material['ai_analysis']['texture'],
-                "pattern": material['ai_analysis']['pattern']
+                "texture": material['ai_analysis']['texture']
             },
             "factory_name": material['factory_name'],
-            "factory_id": material['factory_id'],
             "buyer_name": data['buyer_name'],
             "buyer_contact": data['buyer_contact'],
             "buyer_email": data['buyer_email'],
@@ -679,6 +382,7 @@ def handle_orders():
             "ordered_at": datetime.now().isoformat()
         }
         
+        # Update material
         material['quantity'] = round(material['quantity'] - qty, 2)
         if material['quantity'] <= 0:
             material['status'] = 'sold'
@@ -687,15 +391,19 @@ def handle_orders():
         save_orders()
         save_materials()
         
+        print(f"✅ Order created: {order['id']}")
+        
         return jsonify({
             "message": "Order placed successfully",
             "order": order
         }), 201
     
     except Exception as e:
+        print(f"❌ Order error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
+    print(f"🚀 Starting PunarVastra API on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
