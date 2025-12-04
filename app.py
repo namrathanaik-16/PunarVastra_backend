@@ -1,10 +1,13 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
+import base64
 from datetime import datetime
 import uuid
-from PIL import Image
+import io
+from PIL import Image, ImageStat
 import json
+from collections import Counter
 
 app = Flask(__name__)
 CORS(app)
@@ -31,18 +34,18 @@ def load_database():
         if os.path.exists(DB_FILE):
             with open(DB_FILE, 'r') as f:
                 materials_db = json.load(f)
-        print(f"✅ Loaded {len(materials_db)} materials")
+        print(f"Loaded {len(materials_db)} materials from database")
     except Exception as e:
-        print(f"⚠️ Error loading materials: {e}")
+        print(f"Error loading materials: {e}")
         materials_db = []
     
     try:
         if os.path.exists(ORDERS_FILE):
             with open(ORDERS_FILE, 'r') as f:
                 orders_db = json.load(f)
-        print(f"✅ Loaded {len(orders_db)} orders")
+        print(f"Loaded {len(orders_db)} orders from database")
     except Exception as e:
-        print(f"⚠️ Error loading orders: {e}")
+        print(f"Error loading orders: {e}")
         orders_db = []
 
 
@@ -51,8 +54,9 @@ def save_materials():
     try:
         with open(DB_FILE, 'w') as f:
             json.dump(materials_db, f, indent=2)
+        print(f"Saved {len(materials_db)} materials to database")
     except Exception as e:
-        print(f"⚠️ Error saving materials: {e}")
+        print(f"Error saving materials: {e}")
 
 
 def save_orders():
@@ -60,15 +64,16 @@ def save_orders():
     try:
         with open(ORDERS_FILE, 'w') as f:
             json.dump(orders_db, f, indent=2)
+        print(f"Saved {len(orders_db)} orders to database")
     except Exception as e:
-        print(f"⚠️ Error saving orders: {e}")
+        print(f"Error saving orders: {e}")
 
 
 load_database()
 
 
-def simple_color_analysis(img):
-    """Fast color analysis"""
+def simple_color_detection(img):
+    """Simple color detection from average RGB"""
     img_small = img.copy()
     img_small.thumbnail((100, 100))
     
@@ -77,7 +82,7 @@ def simple_color_analysis(img):
     
     pixels = list(img_small.getdata())
     
-    # Get average color
+    # Calculate average color
     r_avg = sum(p[0] for p in pixels) / len(pixels)
     g_avg = sum(p[1] for p in pixels) / len(pixels)
     b_avg = sum(p[2] for p in pixels) / len(pixels)
@@ -103,14 +108,18 @@ def simple_color_analysis(img):
         return "Multi-color", "multi"
 
 
-def simple_texture_analysis(img):
-    """Fast texture analysis"""
+def simple_texture_detection(img):
+    """Simple texture detection"""
     gray = img.convert('L')
     gray.thumbnail((150, 150))
     
     pixels = list(gray.getdata())
-    variance = sum((p - 128) ** 2 for p in pixels) / len(pixels)
     
+    # Calculate variance
+    mean = sum(pixels) / len(pixels)
+    variance = sum((p - mean) ** 2 for p in pixels) / len(pixels)
+    
+    # Simple texture classification
     if variance < 800:
         return "Smooth Silk", "silk"
     elif variance < 1500:
@@ -123,21 +132,19 @@ def simple_texture_analysis(img):
         return "Cotton Blend", "cotton"
 
 
-def analyze_image_fast(image_path):
-    """Fast AI analysis - under 2 seconds"""
+def analyze_image_simple(image_path):
+    """Simple image analysis"""
     try:
-        print(f"🔍 Analyzing: {image_path}")
-        
         img = Image.open(image_path)
         
         if img.mode != 'RGB':
             img = img.convert('RGB')
         
-        # Fast color analysis
-        color, color_cat = simple_color_analysis(img)
+        # Detect color
+        color, color_cat = simple_color_detection(img)
         
-        # Fast texture analysis  
-        texture, texture_cat = simple_texture_analysis(img)
+        # Detect texture
+        texture, texture_cat = simple_texture_detection(img)
         
         # Generate textile name
         textile_name = f"{color} {texture}"
@@ -159,17 +166,16 @@ def analyze_image_fast(image_path):
             "texture": texture,
             "texture_category": texture_cat,
             "pattern": "Solid",
-            "quality": 0.85,
+            "quality": 0.80,
             "quality_rating": "Good",
             "upcycling_ideas": ideas,
-            "accuracy": "Fast Analysis"
+            "analysis_method": "Simple Analysis"
         }
         
-        print(f"✅ Analysis complete: {textile_name}")
         return result
         
     except Exception as e:
-        print(f"❌ Analysis error: {e}")
+        print(f"Analysis error: {e}")
         return {
             "textile_name": "Cotton Fabric",
             "color": "Multi-color",
@@ -180,7 +186,7 @@ def analyze_image_fast(image_path):
             "quality": 0.75,
             "quality_rating": "Good",
             "upcycling_ideas": ["Bags", "Quilts", "Cushions", "Towels", "Wrapping"],
-            "accuracy": "Fallback"
+            "analysis_method": "Fallback"
         }
 
 
@@ -191,9 +197,9 @@ def allowed_file(filename):
 @app.route('/')
 def home():
     return jsonify({
-        "message": "PunarVastra API - Fast & Reliable",
-        "version": "5.0",
-        "status": "running",
+        "message": "PunarVastra API - Running",
+        "version": "3.0",
+        "status": "online",
         "materials_count": len(materials_db),
         "orders_count": len(orders_db)
     })
@@ -207,55 +213,8 @@ def serve_upload(filename):
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze():
-    """Fast image analysis"""
+    """Analyze image"""
     try:
-        print("📥 Received analyze request")
-        
-        if 'image' not in request.files:
-            print("❌ No image in request")
-            return jsonify({"error": "No image provided"}), 400
-        
-        file = request.files['image']
-        
-        if file.filename == '':
-            print("❌ Empty filename")
-            return jsonify({"error": "No file selected"}), 400
-        
-        if not allowed_file(file.filename):
-            print("❌ Invalid file type")
-            return jsonify({"error": "Invalid file type. Use JPG, PNG, JPEG, GIF, or WEBP"}), 400
-        
-        # Save and analyze
-        temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
-        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-        
-        print(f"💾 Saving to: {temp_path}")
-        file.save(temp_path)
-        
-        print("🔬 Starting analysis...")
-        analysis = analyze_image_fast(temp_path)
-        
-        # Cleanup
-        try:
-            os.remove(temp_path)
-            print(f"🗑️ Cleaned up temp file")
-        except:
-            pass
-        
-        print("✅ Returning analysis results")
-        return jsonify(analysis)
-    
-    except Exception as e:
-        print(f"❌ Analyze error: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/upload', methods=['POST'])
-def upload_material():
-    """Upload material with AI analysis"""
-    try:
-        print("📤 Received upload request")
-        
         if 'image' not in request.files:
             return jsonify({"error": "No image provided"}), 400
         
@@ -267,6 +226,38 @@ def upload_material():
         if not allowed_file(file.filename):
             return jsonify({"error": "Invalid file type"}), 400
         
+        # Save temporarily
+        temp_filename = f"temp_{uuid.uuid4().hex}.jpg"
+        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
+        file.save(temp_path)
+        
+        # Analyze
+        analysis = analyze_image_simple(temp_path)
+        
+        # Cleanup
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        return jsonify(analysis)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/upload', methods=['POST'])
+def upload_material():
+    """Upload material"""
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "No image provided"}), 400
+        
+        file = request.files['image']
+        
+        if file.filename == '' or not allowed_file(file.filename):
+            return jsonify({"error": "Invalid file"}), 400
+        
         # Get form data
         quantity = float(request.form.get('quantity', 0))
         price_per_kg = float(request.form.get('price_per_kg', 0))
@@ -274,17 +265,15 @@ def upload_material():
         factory_id = request.form.get('factory_id', 'FAC-001')
         
         if quantity <= 0 or price_per_kg <= 0:
-            return jsonify({"error": "Quantity and price must be greater than 0"}), 400
+            return jsonify({"error": "Invalid quantity or price"}), 400
         
         # Save image
         filename = f"{uuid.uuid4().hex}_{file.filename}"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
         
-        print(f"💾 Saved material image: {filename}")
-        
         # Analyze
-        analysis = analyze_image_fast(filepath)
+        analysis = analyze_image_simple(filepath)
         
         # Create material
         material = {
@@ -303,35 +292,30 @@ def upload_material():
         materials_db.append(material)
         save_materials()
         
-        print(f"✅ Material created: {material['id']}")
-        
         return jsonify({
             "message": "Material uploaded successfully",
             "material": material
         }), 201
     
     except Exception as e:
-        print(f"❌ Upload error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/materials', methods=['GET'])
 def get_materials():
-    """Get all available materials"""
+    """Get all materials"""
     available = [m for m in materials_db if m.get('status') == 'available' and m.get('quantity', 0) > 0]
-    print(f"📋 Returning {len(available)} available materials")
     return jsonify(available)
 
 
 @app.route('/api/factory/materials', methods=['GET'])
 def get_factory_materials():
-    """Get factory's materials"""
+    """Get factory materials"""
     factory_id = request.args.get('factory_id')
     if not factory_id:
         return jsonify({"error": "factory_id required"}), 400
     
     factory_mats = [m for m in materials_db if m.get('factory_id') == factory_id]
-    print(f"📋 Returning {len(factory_mats)} materials for factory {factory_id}")
     return jsonify(factory_mats)
 
 
@@ -344,13 +328,11 @@ def handle_orders():
     try:
         data = request.json
         
-        # Validate
         required = ['material_id', 'buyer_name', 'buyer_contact', 'buyer_email', 'quantity', 'delivery_address']
         for field in required:
             if field not in data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
+                return jsonify({"error": f"Missing: {field}"}), 400
         
-        # Find material
         material = next((m for m in materials_db if m['id'] == data['material_id']), None)
         if not material:
             return jsonify({"error": "Material not found"}), 404
@@ -361,7 +343,6 @@ def handle_orders():
         
         total = qty * material['price_per_kg']
         
-        # Create order
         order = {
             "id": f"ORD-{uuid.uuid4().hex[:8].upper()}",
             "material_id": data['material_id'],
@@ -382,7 +363,6 @@ def handle_orders():
             "ordered_at": datetime.now().isoformat()
         }
         
-        # Update material
         material['quantity'] = round(material['quantity'] - qty, 2)
         if material['quantity'] <= 0:
             material['status'] = 'sold'
@@ -391,19 +371,15 @@ def handle_orders():
         save_orders()
         save_materials()
         
-        print(f"✅ Order created: {order['id']}")
-        
         return jsonify({
             "message": "Order placed successfully",
             "order": order
         }), 201
     
     except Exception as e:
-        print(f"❌ Order error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    print(f"🚀 Starting PunarVastra API on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
